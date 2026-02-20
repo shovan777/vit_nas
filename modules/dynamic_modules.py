@@ -2,6 +2,14 @@ from torch import nn
 import torch.nn.functional as F
 
 
+class BaseDynamicModule(nn.Module):
+    def get_active_submodule(self):
+        raise NotImplementedError
+
+    def set_active_submodule(self, *args, **kwargs):
+        raise NotImplementedError
+
+
 class DynamicLinear(nn.Module):
     def __init__(self, max_in, max_out, bias=True):
         super().__init__()
@@ -16,7 +24,7 @@ class DynamicLinear(nn.Module):
 
     def forward(self, x):
         active_in = x.size(-1)
-        weight = self.linear.weight[:self.active_out, :active_in]
+        weight = self.linear.weight[: self.active_out, :active_in]
         bias = self.linear.bias[: self.active_out] if self.bias else None
         return F.linear(
             x, weight.contiguous(), bias
@@ -65,10 +73,68 @@ class DynamicMHA(nn.Module):
         q, k, v = qkv[0], qkv[1], qkv[2]
         # scale by per-head dimension (head_dim) as in "Attention is All You Need"
         # which uses sqrt(d_k) where d_k is the key/query dimension for each head.
-        attn = q @ k.transpose(-2, -1) * (self.head_dim ** -0.5)
+        attn = q @ k.transpose(-2, -1) * (self.head_dim**-0.5)
         attn = F.softmax(attn, dim=-1)
         # (B, num_heads, T, head_dim) -> (B, T, num_heads, head_dim) -> (B, T, E)
         # or permute(0, 2, 1, 3) -> reshape
         x = (attn @ v).transpose(1, 2).reshape(batch_size, token_size, -1)
         x = self.proj_linear(x)
+        return x
+
+
+class DynamicMlp(nn.Module):
+    def __init__(
+        self,
+        max_in,
+        max_hidden,
+        max_out,
+        activation=nn.GELU,
+        dropout=0.0,
+        bias=True,
+    ):
+        super().__init__()
+        self.max_in_features = max_in
+        self.max_hidden_features = max_hidden
+        self.max_out_features = max_out
+
+        self.active_in_features = max_in
+        self.active_hidden_features = max_hidden
+        self.active_out_features = max_out
+
+        self.fc1 = DynamicLinear(max_in, max_hidden, bias=bias)
+        self.activation = activation()
+        self.fc2 = DynamicLinear(max_hidden, max_out, bias=bias)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.activation(x)
+        x = self.fc2(x)
+        x = self.dropout(x)
+        return x
+
+
+class DynamicTransformerBlock(nn.Module):
+    def __init__(
+        self,
+        embed_dim,
+        num_heads,
+        mlp_hidden_dim,
+        dropout=0.0,
+        qkv_bias=True,
+        mlp_bias=True,
+    ):
+        super().__init__()
+        self.norm1 = DynamicLayerNorm(embed_dim)
+        self.mha = DynamicMHA(embed_dim, num_heads, bias=qkv_bias)
+        self.norm2 = DynamicLayerNorm(embed_dim)
+        self.mlp = DynamicMlp(embed_dim, mlp_hidden_dim, embed_dim, dropout=dropout, bias=mlp_bias)
+
+    def forward(self, x):
+        # TODO: which is first norm or add + attn -> norm? 
+        # # based on Xiong et al. "On Layer Normalization in the Transformer Architecture" (https://arxiv.org/abs/2002.04745) 
+        # we use pre-norm
+        x += self.mha(self.norm1(x))
+        # TODO: pytorch implements dropout after attention; is that needed here?
+        x += self.mlp(self.norm2(x))
         return x
