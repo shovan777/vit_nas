@@ -473,11 +473,11 @@ if __name__ == "__main__":
             train_stats["val_loss"].append(val_loss)
             train_stats["val_accuracy"].append(val_accuracy)
             print(
-                f"Epoch {epoch + 1}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val Accuracy: {val_accuracy:.4f}"
+                f"Epoch {epoch + 1}: Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}, Val Loss: {val_loss:.4f}, Val Accuracy: {val_accuracy:.4f}"
             )
         else:
             print(
-                f"Epoch {epoch + 1}: Train Loss: {train_loss:.4f}, Accuracy: {train_accuracy:.4f}"
+                f"Epoch {epoch + 1}: Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}"
             )
     test_loss, test_accuracy = evaluate(model, test_loader, criterion, device)
     print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
