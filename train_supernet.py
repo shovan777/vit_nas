@@ -140,13 +140,12 @@ def train_one_epoch_sandwich(
         loss = criterion(outputs, targets)
 
         if teacher_outputs is not None:
-            print("using teacher outputs for distillation with kd_ratio:", kd_ratio)
             kd_loss = kd_criterion(outputs, teacher_outputs)
             # nn.KLDivLoss()(
             #     nn.LogSoftmax(dim=1)(outputs / 4),
             #     nn.Softmax(dim=1)(teacher_outputs / 4),
             # ) * (4 * 4)  # temperature scaling
-            loss = loss * (1 - kd_ratio) + kd_loss * kd_ratio
+            loss = loss + kd_loss * kd_ratio
 
         loss.backward()
         max_loss = loss
@@ -167,7 +166,7 @@ def train_one_epoch_sandwich(
             #     nn.LogSoftmax(dim=1)(outputs / 4),
             #     nn.Softmax(dim=1)(teacher_outputs / 4),
             # ) * (4 * 4)  # temperature scaling
-            min_loss = min_loss * (1 - kd_ratio) + kd_loss * kd_ratio
+            min_loss = min_loss + kd_loss * kd_ratio
         min_loss.backward()
 
         # 3. forward pass with randomly sampled sub-models and compute loss and backpropagate
@@ -189,7 +188,7 @@ def train_one_epoch_sandwich(
                 #     nn.LogSoftmax(dim=1)(outputs / 4),
                 #     nn.Softmax(dim=1)(teacher_outputs / 4),
                 # ) * (4 * 4)  # temperature scaling
-                loss = loss * (1 - kd_ratio) + kd_loss * kd_ratio
+                loss = loss + kd_loss * kd_ratio
             loss.backward()
             intermediate_loss.append(loss.item())
 
