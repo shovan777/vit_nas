@@ -14,7 +14,7 @@ from timm.loss.cross_entropy import SoftTargetCrossEntropy
 # from timm.data import create_transform
 from torchvision.datasets import CIFAR10
 from torchvision import transforms
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
 import matplotlib.pyplot as plt
 
 # internal imports
@@ -347,6 +347,8 @@ if __name__ == "__main__":
         "batch_size": 128,
         "num_epochs": 2,
         "learning_rate": 3e-4,
+        "warmup_lr": 1e-6,
+        "warmup_epochs": 5,
         "validation_split": 0.1,
         "num_random_subnets": 2,  # number of random subnets to sample for each batch
         "kd_ratio": 0.5,  # weight for knowledge distillation loss (between 0 and 1)
@@ -366,7 +368,7 @@ if __name__ == "__main__":
     # freeze(teacher_model)
     teacher_model.to(device)
 
-    # Train or load supernet model
+    # Fine-tune the teacher model
     if config["kd_ratio"] > 0.0:
         print("Started learning for teacher model...")
         if os.path.exists("teacher_model.pth"):
@@ -439,7 +441,13 @@ if __name__ == "__main__":
         validation_split=config["validation_split"],
     )
     criterion = nn.CrossEntropyLoss()
-    optimizer = Adam(model.parameters(), lr=config["learning_rate"])
+    optimizer = AdamW(model.parameters(), lr=config["learning_rate"], weight_decay=0.05)
+
+    warmup_epochs = config["warmup_epochs"]
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=config["num_epochs"]
+    )
+
     kd_criterion = SoftTargetCrossEntropy()
 
     # train the model multiple steps for each design dimension
@@ -450,6 +458,14 @@ if __name__ == "__main__":
     # train_stats keeps track of losses across different design dimensions for plotting later
     train_stats = defaultdict(list)
     for epoch in range(config["num_epochs"]):
+        if epoch < warmup_epochs:
+            warmup_lr = config["warmup_lr"]
+            base_lr = config["learning_rate"]
+            lr_step = (base_lr - warmup_lr) / warmup_epochs
+            current_lr = warmup_lr + lr_step * epoch
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = current_lr
+
         train_loss, train_accuracy, min_loss, mean_intermediate_loss = (
             train_one_epoch_sandwich(
                 model,
@@ -472,12 +488,18 @@ if __name__ == "__main__":
             train_stats["val_loss"].append(val_loss)
             train_stats["val_accuracy"].append(val_accuracy)
             print(
-                f"Epoch {epoch + 1}: Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}, Val Loss: {val_loss:.4f}, Val Accuracy: {val_accuracy:.4f}"
+                f"Epoch {epoch + 1}: Train Loss: {train_loss:.4f}, \
+                Train Accuracy: {train_accuracy:.4f}, Val Loss: {val_loss:.4f}, \
+                Val Accuracy: {val_accuracy:.4f}, LR: {optimizer.param_groups[0]['lr']:.6f}"
             )
         else:
             print(
-                f"Epoch {epoch + 1}: Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}"
+                f"Epoch {epoch + 1}: Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}, LR: {optimizer.param_groups[0]['lr']:.6f}"
             )
+
+        if epoch >= warmup_epochs:
+            lr_scheduler.step()
+
     test_loss, test_accuracy = evaluate(model, test_loader, criterion, device)
     print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
 
