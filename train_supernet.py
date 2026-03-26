@@ -1,7 +1,10 @@
 from collections import defaultdict
 import os
-from tqdm import tqdm
 import random
+import argparse
+
+import numpy as np
+from tqdm import tqdm
 
 import torch
 from torch import nn
@@ -20,6 +23,14 @@ import matplotlib.pyplot as plt
 # internal imports
 from modules.super_net import SuperNet
 from utils.measurements import get_parameters_size
+
+
+def set_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
 
 
 # interface for search space
@@ -325,6 +336,12 @@ def plot_training_curves(train_stats):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train SuperNet based on ViT architecture")
+    parser.add_argument("--config", type=str, default="config.json", help="Path to config file")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+
+    args = parser.parse_args()
+
     # search space for NAS; these would be used
     search_space = SearchSpace(
         embed_dim_options=[512],
@@ -332,6 +349,9 @@ if __name__ == "__main__":
         mlp_dim_options=[1024],  # [512, 1024],
         num_layers_options=[6],  # [2, 4, 6],
     )
+
+    # set random seed for reproducibility
+    set_seed(args.seed)
 
     max_config = search_space.get_max_config()
     # get config from json fileTest Loss: {test_loss:.4f},
@@ -370,17 +390,24 @@ if __name__ == "__main__":
 
     # Fine-tune the teacher model
     if config["kd_ratio"] > 0.0:
-        print("Started learning for teacher model...")
+        train_loader, test_loader, val_loader = build_dataloader(
+            batch_size=config["batch_size"],
+            validation_split=config["validation_split"],
+            img_size=config["img_size"],
+        )
+        criterion = nn.CrossEntropyLoss()
         if os.path.exists("teacher_model.pth"):
+            print("Loading pretrained teacher model...")
             reload_model(teacher_model, "teacher_model.pth")
-        else:
-            # train the supernet model on the full config
-            train_loader, test_loader, val_loader = build_dataloader(
-                batch_size=config["batch_size"],
-                validation_split=config["validation_split"],
-                img_size=config["img_size"],
+            test_loss, test_accuracy = evaluate_teacher(
+                teacher_model, test_loader, criterion, device, img_size=224
             )
-            criterion = nn.CrossEntropyLoss()
+            print(
+                f"Finetuned Teacher {config['teacher_model_name']} Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}"
+            )
+        else:
+            print("Started learning for teacher model...")
+            # train the supernet model on the full config
             optimizer = Adam(teacher_model.parameters(), lr=config["learning_rate"])
 
             train_stats = {
