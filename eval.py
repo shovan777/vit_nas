@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import torch
 import torch.nn.functional as F
@@ -61,25 +62,25 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = SuperNet(
-        img_size=args.img_size,
-        patch_size=4,
-        embed_dim=512,
-        num_heads=8,
-        num_layers=6,
-        mlp_dim=1024,
-        num_classes=10,
-        dropout=0.1,
-    )
-    # Load the model
-    reload_model(model, args.model_path)
-    model.to(device)
-
-    # Build dataloader
+    # Build testloader
     _, test_loader, _ = build_dataloader(batch_size=args.batch_size, img_size=args.img_size)
-
-    # Define criterion
+    
     criterion = torch.nn.CrossEntropyLoss()
+
+    if os.path.exists(args.model_path):
+        model = SuperNet(
+            img_size=args.img_size,
+            patch_size=4,
+            embed_dim=512,
+            num_heads=8,
+            num_layers=6,
+            mlp_dim=1024,
+            num_classes=10,
+            dropout=0.1,
+        )
+        # Load the model
+        reload_model(model, args.model_path)
+        model.to(device)
 
     # Evaluate
     avg_loss, accuracy = evaluate(model, test_loader, criterion, device)

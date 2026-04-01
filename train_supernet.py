@@ -149,9 +149,13 @@ def train_one_epoch_sandwich(
         model.set_active_subnet(max_config)
         outputs = model(inputs)
         loss = criterion(outputs, targets)
-
+        kd_temperature = 4.0
         if teacher_outputs is not None:
-            kd_loss = kd_criterion(outputs, teacher_outputs)
+            # kd_loss = kd_criterion(outputs, teacher_outputs)
+            kd_loss = kd_criterion(
+                F.log_softmax(outputs / kd_temperature, dim=1),
+                F.softmax(teacher_outputs / kd_temperature, dim=1),
+            ) * (kd_temperature * kd_temperature)  # temperature scaling
             # nn.KLDivLoss()(
             #     nn.LogSoftmax(dim=1)(outputs / 4),
             #     nn.Softmax(dim=1)(teacher_outputs / 4),
@@ -172,7 +176,10 @@ def train_one_epoch_sandwich(
         outputs = model(inputs)
         min_loss = criterion(outputs, targets)
         if teacher_outputs is not None:
-            kd_loss = kd_criterion(outputs, teacher_outputs)
+            kd_loss = kd_criterion(
+                F.log_softmax(outputs / kd_temperature, dim=1),
+                F.softmax(teacher_outputs / kd_temperature, dim=1),
+            ) * (kd_temperature * kd_temperature)  # temperature scaling
             # nn.KLDivLoss()(
             #     nn.LogSoftmax(dim=1)(outputs / 4),
             #     nn.Softmax(dim=1)(teacher_outputs / 4),
@@ -194,11 +201,10 @@ def train_one_epoch_sandwich(
             outputs = model(inputs)
             loss = criterion(outputs, targets)
             if teacher_outputs is not None:
-                kd_loss = kd_criterion(outputs, teacher_outputs)
-                # nn.KLDivLoss()(
-                #     nn.LogSoftmax(dim=1)(outputs / 4),
-                #     nn.Softmax(dim=1)(teacher_outputs / 4),
-                # ) * (4 * 4)  # temperature scaling
+                kd_loss = kd_criterion(
+                    F.log_softmax(outputs / kd_temperature, dim=1),
+                    F.softmax(teacher_outputs / kd_temperature, dim=1),
+                ) * (kd_temperature * kd_temperature)  # temperature scaling
                 loss = loss + kd_loss * kd_ratio
             loss.backward()
             intermediate_loss.append(loss.item())
@@ -374,8 +380,8 @@ if __name__ == "__main__":
     )
 
     # kd_criterion = SoftTargetCrossEntropy()
-    # replace with label smoothing
-    kd_criterion = LabelSmoothingCrossEntropy(smoothing=0.1)
+    # kd_criterion = LabelSmoothingCrossEntropy(smoothing=0.1)
+    kd_criterion = nn.KLDivLoss(reduction="batchmean")
 
 
     # train the model multiple steps for each design dimension
