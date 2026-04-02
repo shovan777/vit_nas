@@ -11,7 +11,8 @@ from torch import nn
 import torch.nn.functional as F
 from timm import create_model
 from timm.utils.model import freeze
-from timm.loss.cross_entropy import SoftTargetCrossEntropy, LabelSmoothingCrossEntropy
+from timm.loss.cross_entropy import SoftTargetCrossEntropy
+from timm.data import mixup
 
 # from timm.data import create_transform
 from torch.optim import Adam, AdamW
@@ -114,19 +115,31 @@ def train_one_epoch_sandwich(
     dataloader,
     optimizer,
     criterion,
-    kd_criterion: SoftTargetCrossEntropy,
+    soft_target_criterion: SoftTargetCrossEntropy,
+    kd_criterion,
     device,
     search_space: SearchSpace,
     num_random_subnets=2,
     teacher_model=None,
     kd_ratio=0.0,
+    mixup_fn=None,
 ):
     model.train()
     total_loss = 0.0
     train_accuracy = 0.0
 
+    def supervised_loss(outputs, hard_targets, soft_targets):
+        if soft_targets is not None:
+            return soft_target_criterion(outputs, soft_targets)
+        return criterion(outputs, hard_targets)
+
     for inputs, targets in tqdm(dataloader, desc="Sandwich Training"):
         inputs, targets = inputs.to(device), targets.to(device)
+        hard_targets = targets
+        soft_targets = None
+        if mixup_fn is not None:
+            inputs, soft_targets = mixup_fn(inputs, targets)
+
         optimizer.zero_grad()
 
         teacher_outputs = None
@@ -148,7 +161,8 @@ def train_one_epoch_sandwich(
         max_config = search_space.get_max_config()
         model.set_active_subnet(max_config)
         outputs = model(inputs)
-        loss = criterion(outputs, targets)
+        # loss = criterion(outputs, targets)
+        loss = supervised_loss(outputs, hard_targets, soft_targets)
         kd_temperature = 4.0
         if teacher_outputs is not None:
             # kd_loss = kd_criterion(outputs, teacher_outputs)
@@ -174,7 +188,7 @@ def train_one_epoch_sandwich(
         min_config = search_space.get_min_config()
         model.set_active_subnet(min_config)
         outputs = model(inputs)
-        min_loss = criterion(outputs, targets)
+        min_loss = supervised_loss(outputs, hard_targets, soft_targets)
         if teacher_outputs is not None:
             kd_loss = kd_criterion(
                 F.log_softmax(outputs / kd_temperature, dim=1),
@@ -199,7 +213,7 @@ def train_one_epoch_sandwich(
                 continue  # skip if it matches max or min config
             model.set_active_subnet(random_config)
             outputs = model(inputs)
-            loss = criterion(outputs, targets)
+            loss = supervised_loss(outputs, hard_targets, soft_targets)
             if teacher_outputs is not None:
                 kd_loss = kd_criterion(
                     F.log_softmax(outputs / kd_temperature, dim=1),
@@ -242,6 +256,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train SuperNet based on ViT architecture")
     parser.add_argument("--config", type=str, default="config.json", help="Path to config file")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--mixup", action="store_true", default=0.8, help="Whether to use Mixup data augmentation")
+    parser.add_argument("--cutmix", action="store_true", default=1.0, help="Whether to use CutMix data augmentation")
 
     args = parser.parse_args()
 
@@ -282,6 +298,14 @@ if __name__ == "__main__":
     }
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+    mixup_fn = None
+    if args.mixup or args.cutmix:
+        mixup_fn = mixup.Mixup(
+            mixup_alpha=args.mixup,
+            cutmix_alpha=args.cutmix,
+            num_classes=config["num_classes"],
+        )
 
     # load pretrained teacher model
     teacher_model = create_model(
@@ -382,6 +406,7 @@ if __name__ == "__main__":
     # kd_criterion = SoftTargetCrossEntropy()
     # kd_criterion = LabelSmoothingCrossEntropy(smoothing=0.1)
     kd_criterion = nn.KLDivLoss(reduction="batchmean")
+    soft_target_criterion = SoftTargetCrossEntropy()
 
 
     # train the model multiple steps for each design dimension
@@ -406,11 +431,13 @@ if __name__ == "__main__":
                 train_loader,
                 optimizer,
                 criterion,
+                soft_target_criterion,
                 kd_criterion,
                 device,
                 search_space,
                 teacher_model=teacher_model,
                 kd_ratio=config["kd_ratio"],
+                mixup_fn=mixup_fn,
             )
         )
         train_stats["train_loss"].append(train_loss)
