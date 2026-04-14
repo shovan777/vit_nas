@@ -82,9 +82,9 @@ def main():
         reload_model(model, args.model_path)
         model.to(device)
 
-    # Evaluate
-    avg_loss, accuracy = evaluate(model, test_loader, criterion, device)
-    print(f"Test Loss: {avg_loss:.4f}, Test Accuracy: {accuracy:.4f}")
+        # Evaluate
+        avg_loss, accuracy = evaluate(model, test_loader, criterion, device)
+        print(f"Test Loss: {avg_loss:.4f}, Test Accuracy: {accuracy:.4f}")
 
     # load pretrained teacher model
     teacher_model = create_model(

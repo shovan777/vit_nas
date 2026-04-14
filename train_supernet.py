@@ -251,6 +251,8 @@ def plot_training_curves(train_stats):
     plt.ylabel("Loss")
     plt.title("Training and Test Loss Curves")
     plt.legend()
+    time_stamp = time.strftime("%Y%m%d-%Hh")
+    plt.savefig(f"training_curves_{time_stamp}.png")
     plt.show()
 
 
@@ -300,7 +302,7 @@ if __name__ == "__main__":
     # search space for NAS; these would be used
     search_space = SearchSpace(
         embed_dim_options=[512],
-        num_heads_options=[2, 4, 8],
+        num_heads_options=[8],  # [2, 4, 8],
         mlp_dim_options=[1024],  # [512, 1024],
         num_layers_options=[6],  # [2, 4, 6],
     )
@@ -319,14 +321,14 @@ if __name__ == "__main__":
         "mlp_dim": max_config["mlp_dim"],
         "num_classes": 10,
         "dropout": 0.1,
-        "batch_size": 128,
-        "num_epochs": 1,
-        "learning_rate": 3e-4,
+        "batch_size": 256,
+        "num_epochs": 200,
+        "learning_rate": 8e-4,
         "warmup_lr": 1e-6,
         "warmup_epochs": 5,
         "validation_split": 0.1,
         "num_random_subnets": 2,  # number of random subnets to sample for each batch
-        "kd_ratio": 0.5,  # weight for knowledge distillation loss (between 0 and 1)
+        "kd_ratio": 0.0,  # weight for knowledge distillation loss (between 0 and 1)
         "teacher_model_path": "teacher_model.pth",
         "teacher_model_name": "vit_small_patch16_224",
         "smoothing": 0.1,  # label smoothing factor for distillation loss
@@ -501,8 +503,11 @@ if __name__ == "__main__":
             if val_accuracy > best_val_acc:
                 best_val_acc = val_accuracy
                 best_epoch = epoch + 1
-                save_model(
-                    model,
+                checkpoint_date = time.strftime("%Y%m%d-%Hh")
+                checkpoint_dir = f"models/checkpoint_{checkpoint_date}"
+                os.makedirs(checkpoint_dir, exist_ok=True)
+                save_pth = os.path.join(
+                    checkpoint_dir,
                     name_model(
                         "best",
                         {
@@ -514,6 +519,10 @@ if __name__ == "__main__":
                         best_epoch,
                         best_val_acc,
                     ),
+                )
+                save_model(
+                    model,
+                    save_pth,
                 )
         else:
             print(
