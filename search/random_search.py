@@ -1,7 +1,7 @@
 import copy
 import torch
 from tqdm import tqdm
-from train_supernet import SearchSpace
+from search.search import SearchSpace
 from modules.super_net import SuperNet
 
 

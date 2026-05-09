@@ -11,6 +11,7 @@ Usage (standalone):
     python visualize.py --mode pareto --results-json results.json \
         --checkpoint supernet.pth
 """
+
 import argparse
 import json
 
@@ -23,11 +24,14 @@ import numpy as np
 # 1. Architecture heatmap
 # ---------------------------------------------------------------------------
 
-def architecture_heatmap(config: dict, save_path: str = None, ax=None):
-    """Draw a per-layer architecture heatmap for a single subnet config.
 
-    Rows: heads, MLP dim (two properties per layer)
-    Columns: layer index
+def architecture_heatmap(config: dict, save_path: str = None, ax=None):
+    """Draw a per-layer architecture block plot for a single subnet config.
+
+    Each layer has two grouped bars (num_heads and mlp_dim) normalised to
+    utilisation % so both fit on a single shared y-axis.  The bar outline
+    reaches 100 % (the max option); the filled portion shows how much of
+    that capacity is actually used.
 
     Args:
         config: dict with keys embed_dim, num_layers, num_heads (list), mlp_dim (list)
@@ -35,60 +39,119 @@ def architecture_heatmap(config: dict, save_path: str = None, ax=None):
         ax: optional existing axes to draw into
     """
     L = config["num_layers"]
-    heads = config["num_heads"]    # list[int]
-    mlps  = config["mlp_dim"]      # list[int]
+    heads = config["num_heads"]
+    mlps = config["mlp_dim"]
     embed = config["embed_dim"]
 
-    # normalise to [0,1] for colour mapping
-    all_heads = sorted(set(heads))
-    all_mlps  = sorted(set(mlps))
+    max_h = max(heads)
+    max_m = max(mlps)
 
-    def norm(val, options):
-        idx = options.index(val)
-        return idx / max(len(options) - 1, 1)
-
-    grid = np.zeros((2, L))
-    for i in range(L):
-        grid[0, i] = norm(heads[i], all_heads)
-        grid[1, i] = norm(mlps[i],  all_mlps)
+    head_pct = [100 * h / max_h for h in heads]
+    mlp_pct = [100 * m / max_m for m in mlps]
 
     standalone = ax is None
     if standalone:
-        fig, ax = plt.subplots(figsize=(max(6, L * 0.9), 3))
+        fig, ax = plt.subplots(figsize=(max(6, L * 1.2), 4))
 
-    im = ax.imshow(grid, cmap="YlOrRd", vmin=0, vmax=1, aspect="auto")
+    x = np.arange(L)
+    bar_w = 0.35
+    color_h = "#E05A2B"
+    color_m = "#2B7BE0"
+    color_hbg = "#F5C5B0"
+    color_mbg = "#B0CCF5"
 
-    # row labels
-    ax.set_yticks([0, 1])
-    ax.set_yticklabels(["num_heads", "mlp_dim"], fontsize=11)
+    # background bars reaching 100 %
+    ax.bar(
+        x - bar_w / 2,
+        [100] * L,
+        width=bar_w,
+        color=color_hbg,
+        edgecolor="grey",
+        linewidth=0.8,
+        zorder=2,
+    )
+    ax.bar(
+        x + bar_w / 2,
+        [100] * L,
+        width=bar_w,
+        color=color_mbg,
+        edgecolor="grey",
+        linewidth=0.8,
+        zorder=2,
+    )
 
-    # column labels
-    ax.set_xticks(range(L))
-    ax.set_xticklabels([f"L{i}" for i in range(L)], fontsize=10)
-    ax.set_xlabel("Layer", fontsize=11)
+    # filled bars showing actual utilisation
+    ax.bar(
+        x - bar_w / 2,
+        head_pct,
+        width=bar_w,
+        color=color_h,
+        edgecolor="grey",
+        linewidth=0.8,
+        zorder=3,
+        label="num_heads",
+    )
+    ax.bar(
+        x + bar_w / 2,
+        mlp_pct,
+        width=bar_w,
+        color=color_m,
+        edgecolor="grey",
+        linewidth=0.8,
+        zorder=3,
+        label="mlp_dim",
+    )
 
-    # annotate cells with actual values
+    # annotate with actual values and utilisation %
     for i in range(L):
-        ax.text(i, 0, str(heads[i]), ha="center", va="center", fontsize=10, fontweight="bold")
-        ax.text(i, 1, str(mlps[i]),  ha="center", va="center", fontsize=10, fontweight="bold")
+        ax.text(
+            i - bar_w / 2,
+            head_pct[i] + 2,
+            f"{heads[i]}\n({int(head_pct[i])}%)",
+            ha="center",
+            va="bottom",
+            fontsize=8.5,
+            fontweight="bold",
+            color=color_h,
+        )
+        ax.text(
+            i + bar_w / 2,
+            mlp_pct[i] + 2,
+            f"{mlps[i]}\n({int(mlp_pct[i])}%)",
+            ha="center",
+            va="bottom",
+            fontsize=8.5,
+            fontweight="bold",
+            color=color_m,
+        )
 
-    title = f"Subnet Architecture  |  embed_dim={embed}, L={L}"
-    ax.set_title(title, fontsize=12, pad=8)
-
-    plt.colorbar(im, ax=ax, orientation="vertical", fraction=0.03, pad=0.02,
-                 label="relative option rank")
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"Layer {i}" for i in range(L)], fontsize=10)
+    ax.set_ylabel("Utilisation  (%  of  max  option)", fontsize=11)
+    ax.set_ylim(0, 140)
+    ax.yaxis.grid(True, linestyle="--", alpha=0.4, zorder=0)
+    ax.set_axisbelow(True)
+    ax.set_title(
+        f"Subnet Architecture  |  embed_dim={embed},  num_layers={L}  "
+        f"|  max heads={max_h},  max mlp={max_m}",
+        fontsize=11,
+        pad=8,
+    )
+    ax.legend(fontsize=10, loc="upper right")
 
     if standalone:
         plt.tight_layout()
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches="tight")
-            print(f"Saved heatmap → {save_path}")
+            print(f"Saved architecture plot → {save_path}")
         else:
             plt.show()
         plt.close()
 
-def _evaluate_accuracy(config: dict, checkpoint: str,
-                        img_size: int = 32, batch_size: int = 256) -> float:
+
+def _evaluate_accuracy(
+    config: dict, checkpoint: str, img_size: int = 32, batch_size: int = 256
+) -> float:
     """Extract subnet for config from checkpoint and evaluate on CIFAR-10 test set."""
     import torch
     from torch import nn
@@ -107,16 +170,31 @@ def _evaluate_accuracy(config: dict, checkpoint: str,
     max_qkv_out = sd["transformer_blocks.0.mha.qkv_linear.linear.weight"].shape[0]
     max_E = max_qkv_out // 3
     max_mlp = sd["transformer_blocks.0.mlp.fc1.linear.weight"].shape[0]
-    max_L = sum(1 for k in sd if k.startswith("transformer_blocks.") and k.endswith(".mha.qkv_linear.linear.weight"))
-    max_H = sd["transformer_blocks.0.mha.qkv_linear.linear.weight"].shape[0] // 3 // (max_E // max_E)
+    max_L = sum(
+        1
+        for k in sd
+        if k.startswith("transformer_blocks.")
+        and k.endswith(".mha.qkv_linear.linear.weight")
+    )
+    max_H = (
+        sd["transformer_blocks.0.mha.qkv_linear.linear.weight"].shape[0]
+        // 3
+        // (max_E // max_E)
+    )
     # simpler: infer num_heads from max_E and head_dim stored implicitly
     # just use max values from config lists
     max_H = max(config["num_heads"])
 
-    model = SuperNet(img_size=img_size, patch_size=4,
-                     embed_dim=max_E, num_layers=max_L,
-                     num_heads=max_H, mlp_dim=max_mlp,
-                     num_classes=10, dropout=0.1)
+    model = SuperNet(
+        img_size=img_size,
+        patch_size=4,
+        embed_dim=max_E,
+        num_layers=max_L,
+        num_heads=max_H,
+        mlp_dim=max_mlp,
+        num_classes=10,
+        dropout=0.1,
+    )
     model.load_state_dict(sd)
     model.to(device).eval()
 
@@ -128,14 +206,16 @@ def _evaluate_accuracy(config: dict, checkpoint: str,
     return acc * 100
 
 
-def _fill_missing_accuracies(results: list, checkpoint: str,
-                              img_size: int = 32, batch_size: int = 256) -> list:
+def _fill_missing_accuracies(
+    results: list, checkpoint: str, img_size: int = 32, batch_size: int = 256
+) -> list:
     """Evaluate accuracy for any result entry that is missing it."""
     missing = [r for r in results if "accuracy" not in r]
     if not missing:
         return results
     print(f"Evaluating accuracy for {len(missing)} subnets (this may take a while)...")
     from tqdm import tqdm
+
     for r in tqdm(missing):
         r["accuracy"] = _evaluate_accuracy(
             r["config"], checkpoint, img_size=img_size, batch_size=batch_size
@@ -155,9 +235,15 @@ def _pareto_frontier(macs, accs):
     return pareto_idx
 
 
-def pareto_plot(results: list, save_path: str = None, ax=None,
-                highlight_config: dict = None, checkpoint: str = None,
-                img_size: int = 32, batch_size: int = 256):
+def pareto_plot(
+    results: list,
+    save_path: str = None,
+    ax=None,
+    highlight_config: dict = None,
+    checkpoint: str = None,
+    img_size: int = 32,
+    batch_size: int = 256,
+):
     """Scatter plot of accuracy vs MACs with the Pareto frontier highlighted.
 
     Args:
@@ -171,8 +257,9 @@ def pareto_plot(results: list, save_path: str = None, ax=None,
     """
     # fill missing accuracies if checkpoint provided
     if checkpoint and any("accuracy" not in r for r in results):
-        results = _fill_missing_accuracies(results, checkpoint,
-                                           img_size=img_size, batch_size=batch_size)
+        results = _fill_missing_accuracies(
+            results, checkpoint, img_size=img_size, batch_size=batch_size
+        )
         # persist updated results back to JSON if a path is known
         if save_path and save_path.endswith(".json"):
             with open(save_path, "w") as f:
@@ -195,7 +282,15 @@ def pareto_plot(results: list, save_path: str = None, ax=None,
         fig, ax = plt.subplots(figsize=(8, 5))
 
     # all sampled subnets
-    ax.scatter(macs, accs, alpha=0.5, s=30, color="steelblue", label="sampled subnets", zorder=2)
+    ax.scatter(
+        macs,
+        accs,
+        alpha=0.5,
+        s=30,
+        color="steelblue",
+        label="sampled subnets",
+        zorder=2,
+    )
 
     # Pareto frontier
     pidx = _pareto_frontier(macs, accs)
@@ -204,15 +299,30 @@ def pareto_plot(results: list, save_path: str = None, ax=None,
     # sort by MACs for line
     paired = sorted(zip(pmacs, paccs))
     pmacs_s, paccs_s = zip(*paired)
-    ax.plot(pmacs_s, paccs_s, "o-", color="tomato", linewidth=2, markersize=6,
-            label="Pareto frontier", zorder=3)
+    ax.plot(
+        pmacs_s,
+        paccs_s,
+        "o-",
+        color="tomato",
+        linewidth=2,
+        markersize=6,
+        label="Pareto frontier",
+        zorder=3,
+    )
 
     # optional highlight
     if highlight_config is not None:
         for r, m, a in zip(results, macs, accs):
             if r.get("config") == highlight_config:
-                ax.scatter([m], [a], s=120, color="gold", edgecolors="black",
-                           zorder=4, label="selected subnet")
+                ax.scatter(
+                    [m],
+                    [a],
+                    s=120,
+                    color="gold",
+                    edgecolors="black",
+                    zorder=4,
+                    label="selected subnet",
+                )
                 break
 
     ax.set_xlabel("MACs (M)", fontsize=12)
@@ -235,21 +345,32 @@ def pareto_plot(results: list, save_path: str = None, ax=None,
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def _parse_args():
     parser = argparse.ArgumentParser(description="vit_nas visualizations")
-    parser.add_argument("--mode", choices=["heatmap", "pareto", "both"], default="heatmap")
+    parser.add_argument(
+        "--mode", choices=["heatmap", "pareto", "both"], default="heatmap"
+    )
 
     # heatmap args
-    parser.add_argument("--embed-dim",  type=int, default=512)
+    parser.add_argument("--embed-dim", type=int, default=512)
     parser.add_argument("--num-layers", type=int, default=6)
-    parser.add_argument("--num-heads",  type=int, nargs="+", default=None)
-    parser.add_argument("--mlp-dim",    type=int, nargs="+", default=None)
+    parser.add_argument("--num-heads", type=int, nargs="+", default=None)
+    parser.add_argument("--mlp-dim", type=int, nargs="+", default=None)
 
     # pareto args
-    parser.add_argument("--results-json", type=str, default=None,
-                        help="JSON file: list of {millionMACs, accuracy, config}")
-    parser.add_argument("--checkpoint", type=str, default=None,
-                        help="Supernet checkpoint for evaluating missing accuracies")
+    parser.add_argument(
+        "--results-json",
+        type=str,
+        default=None,
+        help="JSON file: list of {millionMACs, accuracy, config}",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Supernet checkpoint for evaluating missing accuracies",
+    )
     parser.add_argument("--batch-size", type=int, default=256)
 
     parser.add_argument("--save", type=str, default=None, help="Output file path")
@@ -259,21 +380,94 @@ def _parse_args():
 def main():
     args = _parse_args()
 
+    top_5_results = [
+        {
+            "embed_dim": 512,
+            "num_heads": [8, 8, 8, 8, 8, 8],
+            "mlp_dim": [1024, 1024, 1024, 1024, 1024, 1024],
+            "num_layers": 6,
+            "accuracy": 0.8786,
+            "flops": 1_693_013_760,
+            "params": 12_681_733,
+            "cost": -0.378554,
+        },
+        {
+            "embed_dim": 512,
+            "num_heads": [2, 8, 8, 8, 4, 4],
+            "mlp_dim": [512, 1024, 1024, 1024, 1024, 1024],
+            "num_layers": 6,
+            "accuracy": 0.8785,
+            "flops": 1_693_013_376,
+            "params": 12_681_731,
+            "cost": -0.378546,
+        },
+        {
+            "embed_dim": 512,
+            "num_heads": [4, 8, 8, 4, 8, 2],
+            "mlp_dim": [256, 1024, 1024, 1024, 256, 1024],
+            "num_layers": 6,
+            "accuracy": 0.8785,
+            "flops": 1_693_012_480,
+            "params": 12_681_725,
+            "cost": -0.378539,
+        },
+        {
+            "embed_dim": 512,
+            "num_heads": [2, 8, 8, 8, 8, 4],
+            "mlp_dim": [1024, 1024, 1024, 1024, 256, 1024],
+            "num_layers": 6,
+            "accuracy": 0.8785,
+            "flops": 1_693_012_992,
+            "params": 12_681_728,
+            "cost": -0.378521,
+        },
+        {
+            "embed_dim": 512,
+            "num_heads": [4, 8, 8, 8, 2, 2],
+            "mlp_dim": [256, 512, 1024, 1024, 512, 1024],
+            "num_layers": 6,
+            "accuracy": 0.8785,
+            "flops": 1_693_011_328,
+            "params": 12_681_718,
+            "cost": -0.378517,
+        },
+    ]
+
+    # create top 5 arch heatmaps
+    for i, r in enumerate(top_5_results):
+        config = {
+            "embed_dim": r["embed_dim"],
+            "num_layers": r["num_layers"],
+            "num_heads": r["num_heads"],
+            "mlp_dim": r["mlp_dim"],
+        }
+        save_path = f"top_{i+1}_arch_heatmap.png"
+        architecture_heatmap(config, save_path=save_path)
+
     if args.mode in ("heatmap", "both"):
         L = args.num_layers
         H = args.num_heads or [8] * L
-        M = args.mlp_dim   or [1024] * L
-        assert len(H) == L and len(M) == L, \
+        M = args.mlp_dim or [1024] * L
+        assert len(H) == L and len(M) == L, (
             "--num-heads and --mlp-dim must each have num-layers values"
-        config = {"embed_dim": args.embed_dim, "num_layers": L,
-                  "num_heads": H, "mlp_dim": M}
+        )
+        config = {
+            "embed_dim": args.embed_dim,
+            "num_layers": L,
+            "num_heads": H,
+            "mlp_dim": M,
+        }
 
         if args.mode == "both" and args.results_json:
-            fig, axes = plt.subplots(1, 2, figsize=(14, 4))
+            fig, axes = plt.subplots(1, 2, figsize=(15, 4))
             architecture_heatmap(config, ax=axes[0])
             results = json.load(open(args.results_json))
-            pareto_plot(results, ax=axes[1], checkpoint=args.checkpoint,
-                        batch_size=args.batch_size)
+            pareto_plot(
+                results,
+                ax=axes[1],
+                checkpoint=args.checkpoint,
+                batch_size=args.batch_size,
+            )
             plt.tight_layout()
             if args.save:
                 plt.savefig(args.save, dpi=150, bbox_inches="tight")
@@ -287,8 +481,12 @@ def main():
     elif args.mode == "pareto":
         assert args.results_json, "--results-json required for pareto mode"
         results = json.load(open(args.results_json))
-        pareto_plot(results, save_path=args.save, checkpoint=args.checkpoint,
-                    batch_size=args.batch_size)
+        pareto_plot(
+            results,
+            save_path=args.save,
+            checkpoint=args.checkpoint,
+            batch_size=args.batch_size,
+        )
 
 
 if __name__ == "__main__":

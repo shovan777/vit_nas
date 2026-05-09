@@ -14,8 +14,7 @@ from torch import nn
 from eval import evaluate
 from modules.super_net import SuperNet
 from search.evolution import EvolutionSearcher
-from search.search import AnalyticalEfficiencyPredictor
-from train_supernet import SearchSpace
+from search.search import AnalyticalEfficiencyPredictor, SearchSpace
 from utils.data_handler import build_dataloader
 from utils.measurements import get_parameters_size
 

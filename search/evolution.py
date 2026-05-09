@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import tqdm
 
 from modules.super_net import SuperNet
-from train_supernet import SearchSpace
+from search.search import SearchSpace
 
 
 class EvolutionSearcher:
